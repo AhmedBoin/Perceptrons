@@ -216,7 +216,7 @@ impl Tensor {
         }
     }
 
-    pub fn zero_grad(&mut self) {
+    pub fn zero_grad(&self) {
         self.0.lock().unwrap().grad = None;
     }
 
