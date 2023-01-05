@@ -66,6 +66,9 @@ fn main() {
         let db = b.grad().unwrap() * lr;
         w.optimize_with_dyn_array(dw);
         b.optimize_with_dyn_array(db);
+
+        w.zero_grad();
+        b.zero_grad();
     }
     println!("w = {w}\nb = {b}");
 }
