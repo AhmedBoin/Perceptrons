@@ -11,18 +11,19 @@ pub struct TensorBase {
 #[rustfmt::skip]
 impl TensorBase {
     pub fn backward(&mut self, back: DynArray) {
-        // println!("{:?}", back.shape());
-
-        if self.requires_grade == true {
-            if self.grad.is_some() {
-                self.grad = Some(self.grad.clone().unwrap() + back.clone());
-            } else {self.grad = Some(back.clone()); }
+        if self.requires_grade {
+            self.grad = match self.grad.clone() {
+                Some(data) => Some(data + back.clone()),
+                None => Some(back.clone()), 
+            }
         }
 
-        let dep = self.depends_on.clone();
-        if dep.is_some() {
-            dep.unwrap().backward(back);
-            self.depends_on = None;
+        self.depends_on = match self.depends_on.clone() {
+            Some(mut data) => {
+                data.backward(back);
+                None
+            },
+            None => None,
         }
     }
 }
