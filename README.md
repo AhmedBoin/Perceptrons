@@ -1,5 +1,5 @@
 # Perceptrons
-Tensor deployment with autograd.
+Tensor deployment with autograd in pure rust.
 
 short story long
 an example of python code
@@ -37,7 +37,7 @@ print(f"w = {w}\nb = {b}")
 ```
 
 
-equivelent rust code
+equivalent rust code
 ```rust
 use perceptron::prelude::*;
 
@@ -73,9 +73,9 @@ fn main() {
     println!("w = {w}\nb = {b}");
 }
 ```
-this code is not working as you think but, there is many additional fature can be test.
+this code is working in rust better than python, there is many additional fature can be test.
 
 at last, please use display instad of debug if you could, you can see there is no difference between python and rust.
 
-this project is not completed
+maybe this project not be completed due to no interest of github rust and ML developers, leave a comment if you are interest
 
