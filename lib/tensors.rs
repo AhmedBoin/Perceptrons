@@ -12,18 +12,14 @@ pub struct TensorBase {
 impl TensorBase {
     pub fn backward(&mut self, back: DynArray) {
         if self.requires_grade {
-            self.grad = match self.grad.clone() {
-                Some(data) => Some(data + back.clone()),
-                None => Some(back.clone()), 
-            }
+            self.grad = Some(match self.grad.take() {
+                Some(data) => data + &back,
+                None => back.clone(),
+            });
         }
 
-        self.depends_on = match self.depends_on.clone() {
-            Some(mut data) => {
-                data.backward(back);
-                None
-            },
-            None => None,
+        if let Some(mut data) = self.depends_on.take() {
+            data.backward(back);
         }
     }
 }
@@ -34,36 +30,38 @@ pub struct Tensor(Arc<Mutex<TensorBase>>);
 impl fmt::Debug for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let prev = self.0.lock().unwrap();
-        let data = prev.data.clone();
-        let req = prev.requires_grade.clone();
+        let req: bool = prev.requires_grade;
+        write!(f, "Tensor({:?}", prev.data)?;
         match prev.depends_on.as_ref() {
-            Some(dep) => write!(f, "Tensor({:?}, grad_fn=<{:?}>)", data, dep),
+            Some(dep) => {
+                write!(f, ", grad_fn=<{:?}>)", dep)?;
+            }
             None => {
                 if req {
-                    write!(f, "Tensor({:?}, requires_grad={:?})", data, req)
-                } else {
-                    write!(f, "Tensor({:?})", data)
+                    write!(f, ", requires_grad=true")?;
                 }
             }
         }
+        write!(f, ")")
     }
 }
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let prev = self.0.lock().unwrap();
-        let data = prev.data.clone();
-        let req = prev.requires_grade.clone();
+        let req: bool = prev.requires_grade;
+        write!(f, "Tensor({}", prev.data)?;
         match prev.depends_on.as_ref() {
-            Some(dep) => write!(f, "Tensor({}, grad_fn=<{}>)", data, dep),
+            Some(dep) => {
+                write!(f, ", grad_fn=<{}>)", dep)?;
+            }
             None => {
                 if req {
-                    write!(f, "Tensor({}, requires_grad={})", data, req)
-                } else {
-                    write!(f, "Tensor({})", data)
+                    write!(f, ", requires_grad=true")?;
                 }
             }
         }
+        write!(f, ")")
     }
 }
 
@@ -71,25 +69,11 @@ pub trait ToDynArray {
     fn into_dyn(self) -> DynArray;
 }
 
-macro_rules! to_dyn_array {
-    ($($ty:ty),+) => {$(
-        impl ToDynArray for $ty {
-            fn into_dyn(self) -> DynArray {
-                self.into_dyn()
-            }
-        }
-    )*};
+impl<D: ndarray::Dimension> ToDynArray for ArrayBase<OwnedRepr<f64>, D> {
+    fn into_dyn(self) -> DynArray {
+        ArrayBase::into_dyn(self)
+    }
 }
-
-to_dyn_array!(
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 0]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 1]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 3]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 4]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 5]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 6]>>
-);
 
 impl ToDynArray for Vec<f64> {
     fn into_dyn(self) -> DynArray {
@@ -205,16 +189,12 @@ impl Tensor {
     }
 
     pub fn grad_tensor(&self) -> Option<Tensor> {
-        if self.0.lock().unwrap().grad.is_some() {
-            Some(Self(Arc::new(Mutex::new(TensorBase {
-                data: self.0.lock().unwrap().grad.clone().unwrap(),
-                requires_grade: false,
-                depends_on: None,
-                grad: None,
-            }))))
-        } else {
-            None
-        }
+        self.0.lock().unwrap().grad.as_ref().map(|grad| Self(Arc::new(Mutex::new(TensorBase {
+            data: grad.clone(),
+            requires_grade: false,
+            depends_on: None,
+            grad: None,
+        }))))
     }
 
     pub fn zero_grad(&self) {
@@ -270,9 +250,10 @@ impl Tensor {
 
     #[rustfmt::skip]
     pub fn reshape(&self, shape: impl ShapeArg) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
-        let d = self.0.lock().unwrap().data.clone();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
+        let d = lock.data.clone();
         let data = match d.ndim() {
             0 => d.into_dimensionality::<Ix0>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
             1 => d.into_dimensionality::<Ix1>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
@@ -296,10 +277,11 @@ impl Tensor {
     }
 
     pub fn sum(&self) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         Self(Arc::new(Mutex::new(TensorBase {
-            data: arr0(self.0.lock().unwrap().data.sum()).into_dyn(),
+            data: arr0(lock.data.sum()).into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Sum(self.0.clone()))
@@ -311,10 +293,11 @@ impl Tensor {
     }
 
     pub fn mean(&self) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         Self(Arc::new(Mutex::new(TensorBase {
-            data: arr0(self.0.lock().unwrap().data.mean().unwrap() as f64).into_dyn(),
+            data: arr0(lock.data.mean().unwrap() as f64).into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Mean(self.0.clone()))
@@ -326,10 +309,11 @@ impl Tensor {
     }
 
     pub fn pow(&self, num: f64) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         Self(Arc::new(Mutex::new(TensorBase {
-            data: self.0.lock().unwrap().data.mapv(|f| f.powf(num)),
+            data: lock.data.mapv(|f| f.powf(num)),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Pow(num, self.0.clone()))
@@ -341,16 +325,18 @@ impl Tensor {
     }
 
     pub fn dot(&self, rhs: &Tensor) -> Self {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         Self(Arc::new(Mutex::new(TensorBase {
             data: (self
                 .0
                 .lock()
                 .unwrap()
                 .data
-                .dot(rhs.0.lock().unwrap().data.clone()))
+                .dot(rhs_lock.data.clone()))
             .into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
@@ -384,7 +370,7 @@ impl Dot for ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>> {
             (_, _) => panic!("lhs dim: {shape0:?} can't be multiplied by rhs dim: {shape1:?}"),
         }
     }
-    
+
     fn dot_rev(&self, rhs: ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>>, place: bool) -> ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>> {
         let shape0 = self.shape();
         let shape1 = rhs.shape();
