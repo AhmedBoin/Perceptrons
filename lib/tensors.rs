@@ -12,19 +12,19 @@ pub struct TensorBase {
 impl TensorBase {
     pub fn backward(&mut self, back: DynArray) {
         if self.requires_grade {
-            self.grad = match self.grad.clone() {
-                Some(data) => Some(data + back.clone()),
-                None => Some(back.clone()), 
-            }
+            self.grad = Some(match self.grad.take() {
+                Some(data) => data + &back,
+                None => back.clone(),
+            });
         }
 
-        self.depends_on = match self.depends_on.clone() {
-            Some(mut data) => {
-                data.backward(back);
-                None
-            },
-            None => None,
+        if let Some(mut data) = self.depends_on.take() {
+            data.backward(back);
         }
+    }
+
+    fn wrap(self) -> Tensor {
+        Tensor(Arc::new(Mutex::new(self)))
     }
 }
 
@@ -34,36 +34,38 @@ pub struct Tensor(Arc<Mutex<TensorBase>>);
 impl fmt::Debug for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let prev = self.0.lock().unwrap();
-        let data = prev.data.clone();
-        let req = prev.requires_grade.clone();
+        let req: bool = prev.requires_grade;
+        write!(f, "Tensor({:?}", prev.data)?;
         match prev.depends_on.as_ref() {
-            Some(dep) => write!(f, "Tensor({:?}, grad_fn=<{:?}>)", data, dep),
+            Some(dep) => {
+                write!(f, ", grad_fn=<{:?}>)", dep)?;
+            }
             None => {
                 if req {
-                    write!(f, "Tensor({:?}, requires_grad={:?})", data, req)
-                } else {
-                    write!(f, "Tensor({:?})", data)
+                    write!(f, ", requires_grad=true")?;
                 }
             }
         }
+        write!(f, ")")
     }
 }
 
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let prev = self.0.lock().unwrap();
-        let data = prev.data.clone();
-        let req = prev.requires_grade.clone();
+        let req: bool = prev.requires_grade;
+        write!(f, "Tensor({}", prev.data)?;
         match prev.depends_on.as_ref() {
-            Some(dep) => write!(f, "Tensor({}, grad_fn=<{}>)", data, dep),
+            Some(dep) => {
+                write!(f, ", grad_fn=<{}>)", dep)?;
+            }
             None => {
                 if req {
-                    write!(f, "Tensor({}, requires_grad={})", data, req)
-                } else {
-                    write!(f, "Tensor({})", data)
+                    write!(f, ", requires_grad=true")?;
                 }
             }
         }
+        write!(f, ")")
     }
 }
 
@@ -71,25 +73,11 @@ pub trait ToDynArray {
     fn into_dyn(self) -> DynArray;
 }
 
-macro_rules! to_dyn_array {
-    ($($ty:ty),+) => {$(
-        impl ToDynArray for $ty {
-            fn into_dyn(self) -> DynArray {
-                self.into_dyn()
-            }
-        }
-    )*};
+impl<D: ndarray::Dimension> ToDynArray for ArrayBase<OwnedRepr<f64>, D> {
+    fn into_dyn(self) -> DynArray {
+        ArrayBase::into_dyn(self)
+    }
 }
-
-to_dyn_array!(
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 0]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 1]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 2]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 3]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 4]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 5]>>,
-    ArrayBase<OwnedRepr<f64>, Dim<[usize; 6]>>
-);
 
 impl ToDynArray for Vec<f64> {
     fn into_dyn(self) -> DynArray {
@@ -99,88 +87,99 @@ impl ToDynArray for Vec<f64> {
 
 impl ToDynArray for &[f64] {
     fn into_dyn(self) -> DynArray {
-        Array::from_vec(self.iter().map(|&f| f).collect::<Vec<f64>>()).into_dyn()
+        Array::from_iter(self.iter().copied()).into_dyn()
     }
 }
 
 impl Tensor {
     pub fn new(data: impl ToDynArray) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: data.into_dyn(),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn from_dyn(data: DynArray) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: data,
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn from_op(data: DynArray, depends_on: GradFn) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: data,
             requires_grade: false,
             depends_on: Some(depends_on),
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn eye(n: usize) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: Array::<f64, _>::eye(n).into_dyn(),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn ones(shape: &[usize]) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: Array::<f64, _>::ones(shape).into_dyn(),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn zeros(shape: &[usize]) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: Array::<f64, _>::zeros(shape).into_dyn(),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn ones_like(data: &Tensor) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: Array::<f64, _>::ones(data.0.lock().unwrap().data.shape()),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn zeros_like(data: &Tensor) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: Array::<f64, _>::zeros(data.0.lock().unwrap().data.shape()),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
+    }
+
+    fn get_mut_then<F: FnOnce(&mut TensorBase)>(mut self, f: F) -> Self {
+        match Arc::get_mut(&mut self.0) {
+            Some(x) => {
+                f(x.get_mut().unwrap());
+                self
+            }
+            None => {
+                let mut x = self.0.lock().unwrap().to_owned();
+                f(&mut x);
+                x.wrap()
+            }
+        }
     }
 
     pub fn requires_grad(self, boolean: bool) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
-            requires_grade: boolean,
-            ..self.0.lock().unwrap().to_owned()
-        })))
+        self.get_mut_then(|lock| { lock.requires_grade = boolean; })
     }
 
     pub fn set_grad(&self, boolean: bool) {
@@ -188,12 +187,12 @@ impl Tensor {
     }
 
     pub fn detach(&self) -> Self {
-        Self(Arc::new(Mutex::new(TensorBase {
-            data: self.0.lock().unwrap().to_owned().data,
+        TensorBase {
+            data: self.0.lock().unwrap().data.to_owned(),
             requires_grade: false,
             depends_on: None,
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn shape(&self) -> Vec<usize> {
@@ -205,16 +204,12 @@ impl Tensor {
     }
 
     pub fn grad_tensor(&self) -> Option<Tensor> {
-        if self.0.lock().unwrap().grad.is_some() {
-            Some(Self(Arc::new(Mutex::new(TensorBase {
-                data: self.0.lock().unwrap().grad.clone().unwrap(),
-                requires_grade: false,
-                depends_on: None,
-                grad: None,
-            }))))
-        } else {
-            None
-        }
+        self.0.lock().unwrap().grad.as_ref().map(|grad| TensorBase {
+            data: grad.clone(),
+            requires_grade: false,
+            depends_on: None,
+            grad: None,
+        }.wrap())
     }
 
     pub fn zero_grad(&self) {
@@ -222,57 +217,55 @@ impl Tensor {
     }
 
     pub fn backward(&self) {
+        let mut lock = self.0.lock().unwrap();
         assert!(
-            self.0.lock().unwrap().depends_on.is_some(),
+            lock.depends_on.is_some(),
             "tensor doesn't have a grad_fn"
         );
 
-        let shape: Vec<usize> = self.0.lock().unwrap().data.shape().into();
-        self.0.lock().unwrap().backward(Array::ones(shape));
+        let shape: Vec<usize> = lock.data.shape().into();
+        lock.backward(Array::ones(shape));
     }
 
     pub fn backward_with_array(&self, array: impl ToDynArray) {
+        let mut lock = self.0.lock().unwrap();
         assert!(
-            self.0.lock().unwrap().depends_on.is_some(),
+            lock.depends_on.is_some(),
             "tensor doesn't have a grad_fn"
         );
 
-        self.0.lock().unwrap().backward(array.into_dyn());
+        lock.backward(array.into_dyn());
     }
 
     pub fn backward_with_tensor(&self, tensor: Tensor) {
+        let mut lock = self.0.lock().unwrap();
+        let tensor_lock = tensor.0.lock().unwrap();
         assert!(
-            self.0.lock().unwrap().depends_on.is_some(),
+            lock.depends_on.is_some(),
             "tensor doesn't have a grad_fn"
         );
 
-        self.0
-            .lock()
-            .unwrap()
-            .backward(tensor.0.lock().unwrap().to_owned().data);
+        lock.backward(tensor_lock.data.to_owned());
     }
 
     pub fn optimize_with_dyn_array(&self, grad: DynArray) {
-        let s = self.0.lock().unwrap().to_owned().data;
-        self.0.lock().unwrap().data = s - grad;
+        self.0.lock().unwrap().data -= &grad;
     }
 
     pub fn optimize_with_array(&self, grad: impl ToDynArray) {
-        let s = self.0.lock().unwrap().to_owned().data;
-        self.0.lock().unwrap().data = s - grad.into_dyn();
+        self.0.lock().unwrap().data -= &grad.into_dyn();
     }
 
     pub fn optimize_with_tensor(&self, grad: Tensor) {
-        let s = self.0.lock().unwrap().to_owned().data;
-        let grad = grad.0.lock().unwrap().to_owned().data;
-        self.0.lock().unwrap().data = s - grad;
+        self.0.lock().unwrap().data -= &grad.0.lock().unwrap().data;
     }
 
     #[rustfmt::skip]
     pub fn reshape(&self, shape: impl ShapeArg) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
-        let d = self.0.lock().unwrap().data.clone();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
+        let d = lock.data.clone();
         let data = match d.ndim() {
             0 => d.into_dimensionality::<Ix0>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
             1 => d.into_dimensionality::<Ix1>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
@@ -283,7 +276,7 @@ impl Tensor {
             6 => d.into_dimensionality::<Ix6>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
             _ => panic!(),
         };
-        Self(Arc::new(Mutex::new(TensorBase {
+        TensorBase {
             data: data,
             requires_grade: false,
             depends_on: if req || dep {
@@ -292,14 +285,15 @@ impl Tensor {
                 None
             },
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn sum(&self) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
-        Self(Arc::new(Mutex::new(TensorBase {
-            data: arr0(self.0.lock().unwrap().data.sum()).into_dyn(),
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
+        TensorBase {
+            data: arr0(lock.data.sum()).into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Sum(self.0.clone()))
@@ -307,14 +301,15 @@ impl Tensor {
                 None
             },
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn mean(&self) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
-        Self(Arc::new(Mutex::new(TensorBase {
-            data: arr0(self.0.lock().unwrap().data.mean().unwrap() as f64).into_dyn(),
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
+        TensorBase {
+            data: arr0(lock.data.mean().unwrap() as f64).into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Mean(self.0.clone()))
@@ -322,14 +317,15 @@ impl Tensor {
                 None
             },
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn pow(&self, num: f64) -> Self {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
-        Self(Arc::new(Mutex::new(TensorBase {
-            data: self.0.lock().unwrap().data.mapv(|f| f.powf(num)),
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
+        TensorBase {
+            data: lock.data.mapv(|f| f.powf(num)),
             requires_grade: false,
             depends_on: if req || dep {
                 Some(GradFn::Pow(num, self.0.clone()))
@@ -337,20 +333,19 @@ impl Tensor {
                 None
             },
             grad: None,
-        })))
+        }.wrap()
     }
 
     pub fn dot(&self, rhs: &Tensor) -> Self {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
-        Self(Arc::new(Mutex::new(TensorBase {
-            data: (self
-                .0
-                .lock()
-                .unwrap()
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
+        TensorBase {
+            data: (lock
                 .data
-                .dot(rhs.0.lock().unwrap().data.clone()))
+                .dot(rhs_lock.data.clone()))
             .into_dyn(),
             requires_grade: false,
             depends_on: if req || dep {
@@ -359,7 +354,7 @@ impl Tensor {
                 None
             },
             grad: None,
-        })))
+        }.wrap()
     }
 }
 
@@ -384,7 +379,7 @@ impl Dot for ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>> {
             (_, _) => panic!("lhs dim: {shape0:?} can't be multiplied by rhs dim: {shape1:?}"),
         }
     }
-    
+
     fn dot_rev(&self, rhs: ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>>, place: bool) -> ArrayBase<OwnedRepr<f64>, Dim<IxDynImpl>> {
         let shape0 = self.shape();
         let shape1 = rhs.shape();
@@ -420,11 +415,13 @@ impl Add<Tensor> for &Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Add(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() + &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -437,11 +434,13 @@ impl Add<&Tensor> for Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: &Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Add(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() + &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -454,11 +453,13 @@ impl Add for Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Add(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() + &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -471,11 +472,13 @@ impl Add for &Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Add(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() + &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -488,10 +491,11 @@ impl Add<f64> for &Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::AddN(rhs, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs;
+        let result = lock.data.to_owned() + rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -504,10 +508,11 @@ impl Add<f64> for Tensor {
     type Output = Tensor;
 
     fn add(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::AddN(rhs, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data + rhs;
+        let result = lock.data.to_owned() + rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -520,10 +525,11 @@ impl Add<&Tensor> for f64 {
     type Output = Tensor;
 
     fn add(self, rhs: &Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::AddN(self, rhs.0.clone());
-        let result = self + rhs.0.lock().unwrap().to_owned().data;
+        let result = self + rhs_lock.data.to_owned();
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -536,10 +542,11 @@ impl Add<Tensor> for f64 {
     type Output = Tensor;
 
     fn add(self, rhs: Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::AddN(self, rhs.0.clone());
-        let result = self + rhs.0.lock().unwrap().to_owned().data;
+        let result = self + rhs_lock.data.to_owned();
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -552,11 +559,13 @@ impl Sub<Tensor> for &Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Sub(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() - &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -569,11 +578,13 @@ impl Sub<&Tensor> for Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: &Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Sub(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() - &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -586,11 +597,13 @@ impl Sub for &Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Sub(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() - &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -603,11 +616,13 @@ impl Sub for Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Sub(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() - &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -620,10 +635,11 @@ impl Sub<f64> for &Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::SubN(1.0, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs;
+        let result = lock.data.to_owned() - rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -636,10 +652,11 @@ impl Sub<f64> for Tensor {
     type Output = Tensor;
 
     fn sub(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::SubN(1.0, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data - rhs;
+        let result = lock.data.to_owned() - rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -652,10 +669,11 @@ impl Sub<&Tensor> for f64 {
     type Output = Tensor;
 
     fn sub(self, rhs: &Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::SubN(-1.0, rhs.0.clone());
-        let result = self - rhs.0.lock().unwrap().to_owned().data;
+        let result = self - rhs_lock.data.to_owned();
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -668,10 +686,11 @@ impl Sub<Tensor> for f64 {
     type Output = Tensor;
 
     fn sub(self, rhs: Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::SubN(-1.0, rhs.0.clone());
-        let result = self - rhs.0.lock().unwrap().to_owned().data;
+        let result = self - rhs_lock.data.to_owned();
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -684,11 +703,13 @@ impl Mul<&Tensor> for Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: &Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Mul(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -701,11 +722,13 @@ impl Mul<Tensor> for &Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: Tensor) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Mul(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -718,11 +741,13 @@ impl Mul for &Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Mul(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -735,11 +760,13 @@ impl Mul for Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade || rhs.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some()
-            || rhs.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = lock.requires_grade || rhs_lock.requires_grade;
+        let dep = lock.depends_on.is_some()
+            || rhs_lock.depends_on.is_some();
         let grad = GradFn::Mul(self.0.clone(), rhs.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs.0.lock().unwrap().to_owned().data;
+        let result = lock.data.to_owned() * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -752,10 +779,11 @@ impl Mul<f64> for &Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::MulN(rhs, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs;
+        let result = lock.data.to_owned() * rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -768,10 +796,11 @@ impl Mul<f64> for Tensor {
     type Output = Tensor;
 
     fn mul(self, rhs: f64) -> Self::Output {
-        let req = self.0.lock().unwrap().requires_grade;
-        let dep = self.0.lock().unwrap().depends_on.is_some();
+        let lock = self.0.lock().unwrap();
+        let req = lock.requires_grade;
+        let dep = lock.depends_on.is_some();
         let grad = GradFn::MulN(rhs, self.0.clone());
-        let result = self.0.lock().unwrap().to_owned().data * rhs;
+        let result = lock.data.to_owned() * rhs;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -784,10 +813,11 @@ impl Mul<&Tensor> for f64 {
     type Output = Tensor;
 
     fn mul(self, rhs: &Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::MulN(self, rhs.0.clone());
-        let result = self * rhs.0.lock().unwrap().to_owned().data;
+        let result = self * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -800,10 +830,11 @@ impl Mul<Tensor> for f64 {
     type Output = Tensor;
 
     fn mul(self, rhs: Tensor) -> Self::Output {
-        let req = rhs.0.lock().unwrap().requires_grade;
-        let dep = rhs.0.lock().unwrap().depends_on.is_some();
+        let rhs_lock = rhs.0.lock().unwrap();
+        let req = rhs_lock.requires_grade;
+        let dep = rhs_lock.depends_on.is_some();
         let grad = GradFn::MulN(self, rhs.0.clone());
-        let result = self * rhs.0.lock().unwrap().to_owned().data;
+        let result = self * &rhs_lock.data;
         if req || dep {
             Tensor::from_op(result, grad)
         } else {
@@ -954,7 +985,7 @@ impl GradFn {
                 if req0 || dep0 {
                     tensor0.lock().unwrap().backward(
                         back.clone()
-                            .dot_rev(tensor1.lock().unwrap().to_owned().data, false),
+                            .dot_rev(tensor1.lock().unwrap().data.to_owned(), false),
                     );
                 }
                 if req1 || dep1 {
@@ -962,8 +993,8 @@ impl GradFn {
                         tensor0
                             .lock()
                             .unwrap()
-                            .to_owned()
                             .data
+                            .to_owned()
                             .dot_rev(back.clone(), true),
                     );
                 }
@@ -980,25 +1011,25 @@ impl GradFn {
                         tensor0
                             .lock()
                             .unwrap()
-                            .backward(back.clone() * tensor1.lock().unwrap().to_owned().data);
+                            .backward(back.clone() * tensor1.lock().unwrap().data.to_owned());
                     }
                     if req1 || dep1 {
                         tensor1
                             .lock()
                             .unwrap()
-                            .backward(back * tensor0.lock().unwrap().to_owned().data);
+                            .backward(back * tensor0.lock().unwrap().data.to_owned());
                     }
                 } else if shape0.iter().sum::<usize>() > shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
                         tensor0
                             .lock()
                             .unwrap()
-                            .backward(back.clone() * tensor1.lock().unwrap().to_owned().data);
+                            .backward(back.clone() * tensor1.lock().unwrap().data.to_owned());
                     }
                     if req1 || dep1 {
                         tensor1.lock().unwrap().backward(
                             back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0))
-                                * tensor0.lock().unwrap().to_owned().data,
+                                * tensor0.lock().unwrap().data.to_owned(),
                         );
                     }
                 } else if shape0.iter().sum::<usize>() < shape1.iter().sum::<usize>() {
@@ -1008,14 +1039,14 @@ impl GradFn {
                                 .mean_axis(Axis(0))
                                 .unwrap()
                                 .insert_axis(Axis(0))
-                                * tensor1.lock().unwrap().to_owned().data,
+                                * tensor1.lock().unwrap().data.to_owned(),
                         );
                     }
                     if req1 || dep1 {
                         tensor1
                             .lock()
                             .unwrap()
-                            .backward(back * tensor0.lock().unwrap().to_owned().data);
+                            .backward(back * tensor0.lock().unwrap().data.to_owned());
                     }
                 }
             }
