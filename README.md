@@ -40,10 +40,10 @@ equivalent rust code
 use perceptron::prelude::*;
 
 fn main() {
-    let x = tensor![1., 2., 3., 4., 5., 6.].reshape((3, 2));
-    let y = tensor![3., 7., 11.].reshape((3, 1));
+    let x = tensor![1., 2., 3., 4., 5., 6.].reshape((6, 1));
+    let y = tensor![3., 5., 7., 9., 11., 13.].reshape((6, 1));
 
-    let mut w = rand_tensor![2, 1].requires_grad(true);
+    let mut w = rand_tensor![1, 1].requires_grad(true);
     let mut b = rand_tensor![1].requires_grad(true);
 
     let epochs = 1000;
