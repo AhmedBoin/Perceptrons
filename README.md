@@ -17,13 +17,18 @@ epochs = 1000
 lr = 0.01
 
 for _ in range(epochs):
+    // forward propagation
     y_hat = x@w + b
+
+    // loss calculation
     loss = 0.5 * ((y_hat - y)**2).mean()
     
+    // back propagation
     w.grad.zero_()
     b.grad.zero_()
     loss.sum().backward()
 
+    // // optimization
     dw = w.grad
     db = b.grad
     with torch.no_grad():
