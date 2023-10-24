@@ -3,11 +3,8 @@ name = "perceptron"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "perceptron"
-path = "./lib/lib.rs"
-
 [dependencies]
+perceptrons_macros = { path = "./perceptrons_macros" }
 serde = { version = "1.0.148", features = ["derive"] }
 ndarray = { version = "0.15.6", features = ["serde"] }
 ndarray-rand = "0.14.0"

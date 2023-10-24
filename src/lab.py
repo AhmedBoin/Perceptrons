@@ -12,12 +12,16 @@ lr = 0.01
 for _ in range(epochs):
     y_hat = x@w + b
     loss = 0.5 * ((y_hat - y)**2).mean()
+    
+    w.grad.zero_()
+    b.grad.zero_()
     loss.sum().backward()
 
     dw = w.grad
     db = b.grad
     with torch.no_grad():
-        w -= lr * dw
-        b -= lr * db
+        w = w - lr * dw
+        b = b - lr * db
+
 
 print(f"w = {w}\nb = {b}")

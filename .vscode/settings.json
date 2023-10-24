@@ -1,5 +1,4 @@
 {
-    "cSpell.words": [
-        "mapv"
-    ]
+  "cSpell.words": ["mapv", "perceptrons"],
+  "rust-analyzer.showUnlinkedFileNotification": false
 }
