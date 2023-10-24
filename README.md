@@ -47,7 +47,7 @@ fn main() {
     let mut b = rand_tensor![1].requires_grad(true);
 
     let epochs = 1000;
-    let lr = 0.02;
+    let lr = 0.01;
 
     for _ in 0..epochs {
         // forward propagation
