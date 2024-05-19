@@ -76,7 +76,7 @@ fn main() {
     println!("w = {w}\n\nb = {b}");
 }
 ```
-This code is working in Rust better than Python. There are many additional features that can be tested.
+This code is working in Rust the same as Python. There are many additional features that can be tested.
 
 In conclusion, please use Display instead of Debug if you can. You can see that there is no difference between Python and Rust.
 
