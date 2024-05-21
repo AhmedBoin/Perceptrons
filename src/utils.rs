@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use std::sync::atomic::AtomicBool;
 
 #[macro_export]
 macro_rules! rand_array {
@@ -26,14 +27,14 @@ macro_rules! rand_tensor {
     };
 }
 
-pub static NO_GRAD: Mutex<bool> = Mutex::new(false);
+pub static NO_GRAD: AtomicBool = AtomicBool::new(false);
 
 #[macro_export]
 macro_rules! no_grad {
     ($($block:block)*) => {{
-        *NO_GRAD.lock().unwrap() = true;
+        NO_GRAD.store(true, ::std::sync::atomic::Ordering::SeqCst);
         $($block;)*
-        *NO_GRAD.lock().unwrap() = false;
+        NO_GRAD.store(false, ::std::sync::atomic::Ordering::SeqCst);
     }};
 }
 

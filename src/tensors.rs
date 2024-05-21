@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TensorBase {
@@ -32,7 +33,7 @@ impl TensorBase {
     }
 
     fn should_dep_on(&self) -> bool {
-        if *NO_GRAD.lock().unwrap() {
+        if NO_GRAD.load(Ordering::SeqCst) {
             false
         } else {
             self.requires_grade || self.depends_on.is_some()
@@ -173,7 +174,7 @@ impl Tensor {
         TensorBase {
             data: data.into_dyn(),
             requires_grade,
-            depends_on: if *NO_GRAD.lock().unwrap() {
+            depends_on: if NO_GRAD.load(Ordering::SeqCst) {
                 None
             } else {
                 Some(depends_on)
