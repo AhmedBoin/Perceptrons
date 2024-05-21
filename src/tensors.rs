@@ -1001,52 +1001,50 @@ impl GradFn {
         use GradFn::*;
         match self {
             Sum(tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
-                let shape: Vec<usize> = tensor.lock().unwrap().data.shape().into();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
+                let shape: Vec<usize> = lock.data.shape().into();
                 if req || dep {
-                    tensor.lock().unwrap().backward(Array::ones(shape) * back);
+                    lock.backward(Array::ones(shape) * back);
                 }
             }
             Mean(tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
-                let shape: Vec<usize> = tensor.lock().unwrap().data.shape().into();
-                let num: f32 = tensor.lock().unwrap().data.len() as f32;
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
+                let shape: Vec<usize> = lock.data.shape().into();
+                let num: f32 = lock.data.len() as f32;
                 if req || dep {
-                    tensor
-                        .lock()
-                        .unwrap()
-                        .backward((1. / num) * Array::ones(shape) * back);
+                    lock.backward((1. / num) * Array::ones(shape) * back);
                 }
             }
             Add(tensor0, tensor1) => {
-                let shape0 = tensor0.lock().unwrap().data.shape().to_vec();
-                let shape1 = tensor1.lock().unwrap().data.shape().to_vec();
-                let req0 = tensor0.lock().unwrap().requires_grade;
-                let req1 = tensor1.lock().unwrap().requires_grade;
-                let dep0 = tensor0.lock().unwrap().depends_on.is_some();
-                let dep1 = tensor1.lock().unwrap().depends_on.is_some();
+                let mut lock0 = tensor0.lock().unwrap();
+                let mut lock1 = tensor1.lock().unwrap();
+                let shape0 = lock0.data.shape().to_vec();
+                let shape1 = lock1.data.shape().to_vec();
+                let req0 = lock0.requires_grade;
+                let req1 = lock1.requires_grade;
+                let dep0 = lock0.depends_on.is_some();
+                let dep1 = lock1.depends_on.is_some();
                 if shape0.iter().sum::<usize>() == shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(back.clone());
+                        lock0.backward(back.clone());
                     }
                     if req1 || dep1 {
-                        tensor1.lock().unwrap().backward(back);
+                        lock1.backward(back);
                     }
                 } else if shape0.iter().sum::<usize>() > shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(back.clone());
+                        lock0.backward(back.clone());
                     }
                     if req1 || dep1 {
-                        tensor1
-                            .lock()
-                            .unwrap()
-                            .backward(back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0)));
+                        lock1.backward(back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0)));
                     }
                 } else if shape0.iter().sum::<usize>() < shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(
+                        lock0.backward(
                             back.clone()
                                 .mean_axis(Axis(0))
                                 .unwrap()
@@ -1054,44 +1052,44 @@ impl GradFn {
                         );
                     }
                     if req1 || dep1 {
-                        tensor1.lock().unwrap().backward(back);
+                        lock1.backward(back);
                     }
                 }
             }
             AddN(_, tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
                 if req || dep {
-                    tensor.lock().unwrap().backward(back.clone());
+                    lock.backward(back.clone());
                 }
             }
             Sub(tensor0, tensor1) => {
-                let shape0 = tensor0.lock().unwrap().data.shape().to_vec();
-                let shape1 = tensor1.lock().unwrap().data.shape().to_vec();
-                let req0 = tensor0.lock().unwrap().requires_grade;
-                let req1 = tensor1.lock().unwrap().requires_grade;
-                let dep0 = tensor0.lock().unwrap().depends_on.is_some();
-                let dep1 = tensor1.lock().unwrap().depends_on.is_some();
+                let mut lock0 = tensor0.lock().unwrap();
+                let mut lock1 = tensor1.lock().unwrap();
+                let shape0 = lock0.data.shape().to_vec();
+                let shape1 = lock1.data.shape().to_vec();
+                let req0 = lock0.requires_grade;
+                let req1 = lock1.requires_grade;
+                let dep0 = lock0.depends_on.is_some();
+                let dep1 = lock1.depends_on.is_some();
                 if shape0.iter().sum::<usize>() == shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(back.clone());
+                        lock0.backward(back.clone());
                     }
                     if req1 || dep1 {
-                        tensor1.lock().unwrap().backward(-back);
+                        lock1.backward(-back);
                     }
                 } else if shape0.iter().sum::<usize>() > shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(back.clone());
+                        lock0.backward(back.clone());
                     }
                     if req1 || dep1 {
-                        tensor1
-                            .lock()
-                            .unwrap()
-                            .backward(-back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0)));
+                        lock1.backward(-back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0)));
                     }
                 } else if shape0.iter().sum::<usize>() < shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(
+                        lock0.backward(
                             back.clone()
                                 .mean_axis(Axis(0))
                                 .unwrap()
@@ -1099,121 +1097,108 @@ impl GradFn {
                         );
                     }
                     if req1 || dep1 {
-                        tensor1.lock().unwrap().backward(-back);
+                        lock1.backward(-back);
                     }
                 }
             }
             SubN(number, tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
                 if req || dep {
-                    if *number > 0.0 {
-                        tensor.lock().unwrap().backward(back);
+                    lock.backward(if *number > 0.0 {
+                        back
                     } else {
-                        tensor.lock().unwrap().backward(-back);
-                    }
+                        -back
+                    });
                 }
             }
             Dot(tensor0, tensor1) => {
-                let req0 = tensor0.lock().unwrap().requires_grade;
-                let req1 = tensor1.lock().unwrap().requires_grade;
-                let dep0 = tensor0.lock().unwrap().depends_on.is_some();
-                let dep1 = tensor1.lock().unwrap().depends_on.is_some();
+                let mut lock0 = tensor0.lock().unwrap();
+                let mut lock1 = tensor1.lock().unwrap();
+                let req0 = lock0.requires_grade;
+                let req1 = lock1.requires_grade;
+                let dep0 = lock0.depends_on.is_some();
+                let dep1 = lock1.depends_on.is_some();
                 if req0 || dep0 {
-                    tensor0.lock().unwrap().backward(
+                    lock0.backward(
                         back.clone()
-                            .dot_rev(tensor1.lock().unwrap().data.to_owned(), false),
+                            .dot_rev(lock1.data.to_owned(), false),
                     );
                 }
                 if req1 || dep1 {
-                    tensor1.lock().unwrap().backward(
-                        tensor0
-                            .lock()
-                            .unwrap()
-                            .data
+                    lock1.backward(
+                        lock0.data
                             .to_owned()
                             .dot_rev(back.clone(), true),
                     );
                 }
             }
             Mul(tensor0, tensor1) => {
-                let shape0 = tensor0.lock().unwrap().data.shape().to_vec();
-                let shape1 = tensor1.lock().unwrap().data.shape().to_vec();
-                let req0 = tensor0.lock().unwrap().requires_grade;
-                let req1 = tensor1.lock().unwrap().requires_grade;
-                let dep0 = tensor0.lock().unwrap().depends_on.is_some();
-                let dep1 = tensor1.lock().unwrap().depends_on.is_some();
+                let mut lock0 = tensor0.lock().unwrap();
+                let mut lock1 = tensor1.lock().unwrap();
+                let shape0 = lock0.data.shape().to_vec();
+                let shape1 = lock1.data.shape().to_vec();
+                let req0 = lock0.requires_grade;
+                let req1 = lock1.requires_grade;
+                let dep0 = lock0.depends_on.is_some();
+                let dep1 = lock1.depends_on.is_some();
                 if shape0.iter().sum::<usize>() > shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0
-                            .lock()
-                            .unwrap()
-                            .backward(back.clone() * tensor1.lock().unwrap().data.to_owned());
+                        lock0.backward(back.clone() * lock1.data.to_owned());
                     }
                     if req1 || dep1 {
-                        tensor1
-                            .lock()
-                            .unwrap()
-                            .backward(back * tensor0.lock().unwrap().data.to_owned());
+                        lock1.backward(back * lock0.data.to_owned());
                     }
                 } else if shape0.iter().sum::<usize>() > shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0
-                            .lock()
-                            .unwrap()
-                            .backward(back.clone() * tensor1.lock().unwrap().data.to_owned());
+                        lock0.backward(back.clone() * lock1.data.to_owned());
                     }
                     if req1 || dep1 {
-                        tensor1.lock().unwrap().backward(
+                        lock1.backward(
                             back.mean_axis(Axis(0)).unwrap().insert_axis(Axis(0))
-                                * tensor0.lock().unwrap().data.to_owned(),
+                                * lock0.data.to_owned(),
                         );
                     }
                 } else if shape0.iter().sum::<usize>() < shape1.iter().sum::<usize>() {
                     if req0 || dep0 {
-                        tensor0.lock().unwrap().backward(
+                        lock0.backward(
                             back.clone()
                                 .mean_axis(Axis(0))
                                 .unwrap()
                                 .insert_axis(Axis(0))
-                                * tensor1.lock().unwrap().data.to_owned(),
+                                * lock1.data.to_owned(),
                         );
                     }
                     if req1 || dep1 {
-                        tensor1
-                            .lock()
-                            .unwrap()
-                            .backward(back * tensor0.lock().unwrap().data.to_owned());
+                        lock1.backward(back * lock0.data.to_owned());
                     }
                 }
             }
             MulN(number, tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
                 if req || dep {
-                    tensor.lock().unwrap().backward(back.clone() * *number);
+                    lock.backward(back.clone() * *number);
                 }
             }
             Pow(number, tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
-                let data = tensor.lock().unwrap().data.clone();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
+                let data = lock.data.clone();
                 if req || dep {
-                    tensor
-                        .lock()
-                        .unwrap()
-                        .backward(data.mapv(|f| f.powf(*number - 1.)) * *number * back);
+                    lock.backward(data.mapv(|f| f.powf(*number - 1.)) * *number * back);
                 }
             }
             Reshape(tensor) => {
-                let req = tensor.lock().unwrap().requires_grade;
-                let dep = tensor.lock().unwrap().depends_on.is_some();
-                let shape: Vec<usize> = tensor.lock().unwrap().data.shape().into();
+                let mut lock = tensor.lock().unwrap();
+                let req = lock.requires_grade;
+                let dep = lock.depends_on.is_some();
+                let shape: Vec<usize> = lock.data.shape().into();
                 if req || dep {
-                    tensor
-                        .lock()
-                        .unwrap()
-                        .backward(back.to_shape(shape).unwrap().to_owned());
+                    lock.backward(back.to_shape(shape).unwrap().to_owned());
                 }
             }
         }
