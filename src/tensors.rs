@@ -31,6 +31,14 @@ impl TensorBase {
         self.backward(back);
     }
 
+    fn should_dep_on(&self) -> bool {
+        if *NO_GRAD.lock().unwrap() {
+            false
+        } else {
+            self.requires_grade || self.depends_on.is_some()
+        }
+    }
+
     fn wrap(self) -> Tensor {
         Tensor(Arc::new(Mutex::new(self)))
     }
@@ -303,8 +311,6 @@ impl Tensor {
     #[rustfmt::skip]
     pub fn reshape(&self, shape: impl ShapeArg) -> Self {
         let lock = self.0.lock().unwrap();
-        let req = lock.requires_grade;
-        let dep = lock.depends_on.is_some();
         let d = lock.data.clone();
         let data = match d.ndim() {
             0 => d.into_dimensionality::<Ix0>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
@@ -316,9 +322,7 @@ impl Tensor {
             6 => d.into_dimensionality::<Ix6>().unwrap().to_shape(shape).unwrap().to_owned().into_dyn(),
             _ => panic!("There is no dimensionality greater than 6"),
         };
-        let depends_on = if *NO_GRAD.lock().unwrap() {
-            None
-        } else if req || dep {
+        let depends_on = if lock.should_dep_on() {
             Some(GradFn::Reshape(self.0.clone()))
         } else {
             None
@@ -333,11 +337,7 @@ impl Tensor {
 
     pub fn sum(&self) -> Self {
         let lock = self.0.lock().unwrap();
-        let req = lock.requires_grade;
-        let dep = lock.depends_on.is_some();
-        let depends_on = if *NO_GRAD.lock().unwrap() {
-            None
-        } else if req || dep {
+        let depends_on = if lock.should_dep_on() {
             Some(GradFn::Sum(self.0.clone()))
         } else {
             None
@@ -352,11 +352,7 @@ impl Tensor {
 
     pub fn mean(&self) -> Self {
         let lock = self.0.lock().unwrap();
-        let req = lock.requires_grade;
-        let dep = lock.depends_on.is_some();
-        let depends_on = if *NO_GRAD.lock().unwrap() {
-            None
-        } else if req || dep {
+        let depends_on = if lock.should_dep_on() {
             Some(GradFn::Mean(self.0.clone()))
         } else {
             None
@@ -371,11 +367,7 @@ impl Tensor {
 
     pub fn pow(&self, num: f32) -> Self {
         let lock = self.0.lock().unwrap();
-        let req = lock.requires_grade;
-        let dep = lock.depends_on.is_some();
-        let depends_on = if *NO_GRAD.lock().unwrap() {
-            None
-        } else if req || dep {
+        let depends_on = if lock.should_dep_on() {
             Some(GradFn::Pow(num, self.0.clone()))
         } else {
             None
@@ -392,12 +384,7 @@ impl Tensor {
     pub fn dot(&self, rhs: &Tensor) -> Self {
         let lock = self.0.lock().unwrap();
         let rhs_lock = rhs.0.lock().unwrap();
-        let req = lock.requires_grade || rhs_lock.requires_grade;
-        let dep = lock.depends_on.is_some()
-            || rhs_lock.depends_on.is_some();
-        let depends_on = if *NO_GRAD.lock().unwrap() {
-            None
-        } else if req || dep {
+        let depends_on = if lock.should_dep_on() || rhs_lock.should_dep_on() {
             Some(GradFn::Dot(self.0.clone(), rhs.0.clone()))
         } else {
             None
