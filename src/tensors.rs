@@ -24,6 +24,13 @@ impl TensorBase {
         }
     }
 
+    pub fn backward_strict(&mut self, back: DynArray) {
+        if self.depends_on.is_none() {
+            panic!("tensor doesn't have a grad_fn");
+        }
+        self.backward(back);
+    }
+
     fn wrap(self) -> Tensor {
         Tensor(Arc::new(Mutex::new(self)))
     }
@@ -266,34 +273,19 @@ impl Tensor {
 
     pub fn backward(&self) {
         let mut lock = self.0.lock().unwrap();
-        assert!(
-            lock.depends_on.is_some(),
-            "tensor doesn't have a grad_fn"
-        );
-
         let shape: Vec<usize> = lock.data.shape().into();
-        lock.backward(Array::ones(shape));
+        lock.backward_strict(Array::ones(shape));
     }
 
     pub fn backward_with_array(&self, array: impl ToDynArray) {
         let mut lock = self.0.lock().unwrap();
-        assert!(
-            lock.depends_on.is_some(),
-            "tensor doesn't have a grad_fn"
-        );
-
-        lock.backward(array.into_dyn());
+        lock.backward_strict(array.into_dyn());
     }
 
     pub fn backward_with_tensor(&self, tensor: Tensor) {
         let mut lock = self.0.lock().unwrap();
         let tensor_lock = tensor.0.lock().unwrap();
-        assert!(
-            lock.depends_on.is_some(),
-            "tensor doesn't have a grad_fn"
-        );
-
-        lock.backward(tensor_lock.data.to_owned());
+        lock.backward_strict(tensor_lock.data.to_owned());
     }
 
     pub fn optimize_with_dyn_array(&self, grad: DynArray) {
