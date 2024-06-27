@@ -35,8 +35,8 @@ fn test1() {
         loss.backward();
 
         // // optimization
-        let dw = w.grad().unwrap() * lr;
-        let db = b.grad().unwrap() * lr;
+        let dw = w.grad_tensor().unwrap() * lr;
+        let db = b.grad_tensor().unwrap() * lr;
         w.optimize(dw);
         b.optimize(db);
 
@@ -69,8 +69,8 @@ fn test2() {
 
         // // optimization
         no_grad!({
-            w = &w - lr * w.grad().unwrap();
-            b = &b - lr * b.grad().unwrap();
+            w = &w - lr * w.grad_tensor().unwrap();
+            b = &b - lr * b.grad_tensor().unwrap();
         });
 
         w.zero_grad();
